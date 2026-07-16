@@ -2,7 +2,7 @@
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # --- Cal.com booking payload (only the fields we use) ---
@@ -28,8 +28,7 @@ class CalcomBookingPayload(BaseModel):
     attendees: list[CalcomAttendee] = []
     responses: dict[str, Any] = {}  # the booking-form answers
 
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
 
 # --- Normalized booking, after field extraction ---

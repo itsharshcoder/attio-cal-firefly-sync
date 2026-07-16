@@ -1,10 +1,14 @@
-"""Cal.com webhook endpoint: verify -> de-dupe -> ack 200 -> process in background."""
+"""HTTP endpoint that Cal.com POSTs to.
+
+Flow (spec §16): verify signature -> respond 200 fast -> do the real Attio work
+in the background. Attio "assert" is idempotent, so a duplicate booking webhook
+simply re-upserts the same records — no local database is needed.
+"""
 
 import json
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 
-from app import db
 from app.config import settings
 from app.logging_conf import logger
 from app.models import CalcomBookingPayload
@@ -15,7 +19,8 @@ router = APIRouter(prefix="/webhooks/cal", tags=["Cal.com"])
 
 
 async def _safe(handler, payload) -> None:
-    """Run a background handler, logging a one-line error instead of a traceback."""
+    """Run a handler in the background; log a clean one-line error instead of a
+    giant traceback if something fails (e.g. an Attio hiccup)."""
     try:
         await handler(payload)
     except Exception as e:  # noqa: BLE001
@@ -27,22 +32,19 @@ async def _safe(handler, payload) -> None:
 async def cal_webhook(request: Request, background: BackgroundTasks):
     raw = await request.body()
 
+    # 1. Verify the request really came from Cal.com (spec §15).
     signature = request.headers.get("x-cal-signature-256", "")
     if not verify_signature(raw, signature, settings.calcom_webhook_secret):
+        # 401 = Unauthorized. We refuse to process unsigned/forged requests.
         raise HTTPException(status_code=401, detail="invalid signature")
 
     body = json.loads(raw)
     trigger = body.get("triggerEvent", "")
     payload_data = body.get("payload", {})
 
-    uid = payload_data.get("uid", "unknown")
-    idem_key = f"calcom:{trigger}:{uid}"
-    if db.already_processed(idem_key):
-        logger.info("Duplicate Cal.com webhook %s — ignoring.", idem_key)
-        return {"status": "ok", "note": "duplicate ignored"}
-    db.store_event("calcom", idem_key, raw.decode("utf-8", "replace"))
-
     logger.info("Received Cal.com webhook: %s", trigger)
+
+    # 2. Parse and route. Heavy work runs AFTER we return 200 (background).
     payload = CalcomBookingPayload(**payload_data)
 
     if trigger == "BOOKING_CREATED":

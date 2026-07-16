@@ -4,7 +4,6 @@ Rules: Person is keyed by email; Company is keyed by work-email domain, or by
 name for free/personal emails. Free-provider domains are never company domains.
 """
 
-import re
 from typing import Any, Optional
 
 from app.config import settings
@@ -51,14 +50,6 @@ def is_role_mailbox(email: str) -> bool:
 def is_junk_company(name: str) -> bool:
     n = (name or "").strip().lower()
     return (not n) or n in _JUNK_NAMES or len(n) <= 1
-
-
-def normalize_company_name(name: str) -> str:
-    """Lowercase, trim, and strip common suffixes (Inc/LLC/Ltd/…) for matching."""
-    n = (name or "").strip().lower()
-    n = re.sub(r"[.,]", "", n)
-    n = re.sub(r"\b(inc|llc|ltd|pvt|private|limited|corp|co)\b", "", n)
-    return re.sub(r"\s+", " ", n).strip()
 
 
 def _clean(value: Any) -> Optional[str]:

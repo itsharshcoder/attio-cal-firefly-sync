@@ -15,9 +15,17 @@ class Settings(BaseSettings):
     # Fireflies
     fireflies_webhook_secret: str = ""
     fireflies_api_key: str = ""
+    # Auto-fetch poller: seconds between pulling new transcripts (0 = off, webhook
+    # only). E.g. 300 = every 5 minutes.
+    fireflies_poll_seconds: int = 0
+    fireflies_poll_limit: int = 25
 
     # Attio
     attio_api_key: str = ""
+
+    # Security: webhook signatures are verified (HMAC-SHA256). If a secret is left
+    # blank, requests are REJECTED unless this is True (local testing only).
+    allow_unsigned_webhooks: bool = False
 
     # Claude (meeting analysis)
     anthropic_api_key: str = ""

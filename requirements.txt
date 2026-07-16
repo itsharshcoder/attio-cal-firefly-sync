@@ -1,6 +1,16 @@
-fastapi>=0.118
-uvicorn[standard]>=0.34
-httpx>=0.28
-pydantic>=2.12
-pydantic-settings>=2.7
-anthropic>=0.69
+# Pinned to known-good versions (tested on Python 3.14) for reproducible deploys.
+# To upgrade, bump deliberately and re-run the edge-case harness.
+
+# --- Web server ---
+fastapi==0.139.0           # the web framework that receives the webhooks
+uvicorn[standard]==0.50.1  # the actual server process that runs FastAPI
+
+# --- HTTP client (to call Attio / Fireflies / Cal.com APIs) ---
+httpx==0.28.1
+
+# --- Config & validation ---
+pydantic==2.13.4           # ships prebuilt wheels for Python 3.14
+pydantic-settings==2.14.2  # reads your .env file into a typed Settings object
+
+# --- The "Analysis" step (LLM over the Fireflies transcript) ---
+anthropic==0.116.0         # official Claude SDK

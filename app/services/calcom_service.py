@@ -1,7 +1,10 @@
-"""Cal.com booking handling: resolve Company, then Person (+ guests), set the
-initial status, and auto-retry any Fireflies summary that arrived early."""
+"""Cal.com booking handling (table-less; all state lives in Attio).
 
-from app import db
+Resolve the Company (by work-email domain, else name), then the Person by email
+with a same-name-at-company fallback for a new email, link guests to the same
+Company, and set the initial status.
+"""
+
 from app.clients.attio import _value, attio
 from app.logging_conf import logger
 from app.models import BookingInfo, CalcomBookingPayload
@@ -50,7 +53,7 @@ async def handle_booking_created(payload: CalcomBookingPayload) -> dict:
         domain_unverified=domain_unverified, extra=company_extra,
     )
 
-    # 2) Person (matched by email), linked to the Company.
+    # 2) Person — email is the reliable key; same-name fallback handles a new email.
     person_extra = {"dsv_source": _value("Cal.com booking")}
     if info.lead_source:
         person_extra["dsv_lead_source"] = _value(info.lead_source)
@@ -59,42 +62,25 @@ async def handle_booking_created(payload: CalcomBookingPayload) -> dict:
     if needs_review:
         person_extra["dsv_needs_review"] = _value(True)
 
-    person_id = None
+    person_id, merged = (None, False)
     if info.person_email:
-        person_id = await attio.assert_person(
+        person_id, merged = await attio.upsert_person(
             name=info.person_name, email=info.person_email, phone=info.person_phone,
-            company_record_id=company_id, extra=person_extra,
+            company_id=company_id, extra=person_extra,
         )
 
     # 2b) Guests -> extra People on the same Company.
     for guest_email in info.guest_emails:
-        await attio.assert_person(
+        await attio.upsert_person(
             name=guest_email.split("@")[0].title(), email=guest_email, phone=None,
-            company_record_id=company_id,
+            company_id=company_id,
             extra={"dsv_source": _value("Cal.com booking (guest)")},
         )
-        db.cache_put(f"company:for-email:{guest_email}", company_id)
 
-    # 3) Cache identity -> company so the Fireflies step can correlate later.
-    if info.person_email:
-        db.cache_put(f"company:for-email:{info.person_email}", company_id)
-        db.cache_put(f"person:email:{info.person_email}", person_id or "")
-    if domain:
-        db.cache_put(f"company:domain:{domain}", company_id)
-
-    # 4) Auto-retry any Fireflies summary that arrived before this booking.
-    from app.services import fireflies_service  # local import avoids a cycle
-    for e in [info.person_email, *info.guest_emails]:
-        if not e:
-            continue
-        for meeting_id in db.take_pending_fireflies_for_email(e):
-            logger.info("Retrying parked Fireflies meeting %s for %s", meeting_id, e)
-            await fireflies_service.handle_transcription_completed(meeting_id)
-
-    logger.info("Booking done: company=%s person=%s guests=%d review=%s",
-                company_id, person_id, len(info.guest_emails), needs_review)
+    logger.info("Booking done: company=%s person=%s guests=%d review=%s merged=%s",
+                company_id, person_id, len(info.guest_emails), needs_review, merged)
     return {"status": "ok", "company_id": company_id, "person_id": person_id,
-            "guests": info.guest_emails, "needs_review": needs_review,
+            "guests": info.guest_emails, "needs_review": needs_review or merged,
             "booking_uid": info.booking_uid}
 
 
